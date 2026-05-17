@@ -1,0 +1,6 @@
+flask
+tensorflow
+numpy
+pillow
+line-bot-sdk==2.4.2
+gunicor
