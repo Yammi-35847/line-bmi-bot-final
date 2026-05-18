@@ -7,11 +7,11 @@ import numpy as np
 import os
 import tensorflow as tf
 from google import genai
+
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyADD6S9tPlbAXXCElffpOkh6_d8MCwEidE")
 ai_client = genai.Client(api_key=GEMINI_KEY)
 app = Flask(__name__)
 
-# ตั้งค่า LINE API
 line_bot_api = LineBotApi("fkzpG65r65ziCzYSFVzgYTkUkHcEY9kA2g+Q0AEQXyedgFeVIYEDSalRQoPblZlIHFqWTla6zTucQm226FAt6/vhTXqVuUxa/1Ebpjoq7T65QhkoadXnmcobyyR3IXqQwiJdi2xX8j6vz0s7u8tspgdB04t89/1O/w1cDnyilFU=")
 handler = WebhookHandler("703a0d03e0a710133195e50703972a2e")
 
@@ -20,10 +20,8 @@ model = None
 def load_model():
     global model
     if model is None:
-        # โหลดโมเดล (ต้องมั่นใจว่าชื่อไฟล์ใน Replit คือ keras_model.h5)
         model = tf.keras.models.load_model("keras_model.h5")
 
-# โหลด Labels จากไฟล์
 with open("labels.txt", "r", encoding="utf-8") as f:
     labels = [line.strip() for line in f.readlines()]
 
@@ -37,13 +35,12 @@ def callback():
         abort(400)
     return 'OK'
 
-# 1. จัดการข้อความ (BMI)
 @handler.add(MessageEvent, message=TextMessage) 
 def handler_text_message(event):
     text = event.message.text
+    
     if "น้ำหนัก" in text and "ส่วนสูง" in text:
          try:
-             # คาดหวังรูปแบบ: น้ำหนัก 70 ส่วนสูง 170
              parts = text.split()
              w = float(parts[1])
              h = float(parts[3])
@@ -59,10 +56,33 @@ def handler_text_message(event):
                  advice = "ค่า BMI ของคุณสูงกว่าเกณฑ์นะคะ ควรเลี่ยงของทอดและของหวาน แนะนำอาหารไขมันต่ำ เช่น ต้มจืดค่ะ"
              
              line_bot_api.reply_message(event.reply_token, TextSendMessage(text=result + advice))
+             return  
          except Exception:
              line_bot_api.reply_message(event.reply_token, TextSendMessage(text="กรุณาพิมพ์ในรูปแบบ: น้ำหนัก 70 ส่วนสูง 170"))
+             return 
+             
+    try:
+        system_prompt = (
+            "คุณคือผู้เชี่ยวชาญด้านอาหารและสุขภาพที่ใจดี เป็นมิตร และพูดจาไพเราะ (ลงท้ายด้วย ค่ะ/นะคะ) "
+            "มีหน้าที่ตอบคำถาม คุยเล่น และให้คำแนะนำเรื่องอาหารการกินกับผู้ใช้ "
+            "กฎเหล็ก: ให้แนะนำอาหารในแง่ดี สร้างสรรค์ น่ากิน แต่ต้องคอยเตือนเรื่องที่ควรเตือนอย่างประนีประนอม "
+            "(เช่น หากผู้ใช้บอกว่าอยากกินของหวาน ให้แนะนำเมนูที่อร่อยแต่เตือนเรื่องปริมาณน้ำตาล หรือเสนอทางเลือกสุขภาพที่อร่อยไม่แพ้กัน) "
+            "เน้นการให้กำลังใจ ไม่พูดให้ผู้ใช้รู้สึกผิด และตอบคำถามทั่วไปอื่นๆ ได้อย่างเป็นธรรมชาติ"
+        )
+        
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=text,
+            config={'system_instruction': system_prompt}
+        )
+        
+        reply_text = response.text
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัยด้วยนะคะ ระบบประมวลผลข้อความขัดข้องชั่วคราวค่ะ"))
 
-# 2. จัดการรูปภาพ (AI Food Scanner)
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
     try:
@@ -72,7 +92,6 @@ def handle_image_message(event):
             for chunk in message_content.iter_content():
                 f.write(chunk)
         
-        # ประมวลผลรูปภาพ
         image = Image.open("temp_image.jpg").convert("RGB")
         size = (224, 224)
         image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
@@ -82,13 +101,11 @@ def handle_image_message(event):
         data = np.ndarray(shape=(1, 224, 224, 3), dtype=np.float32)
         data[0] = normalized_image_array
         
-        # ทำนายผล
         load_model()
         prediction = model.predict(data)
         index = np.argmax(prediction)
         food_name = labels[index].strip()
         
-        # ฐานข้อมูลแคลอรี่ (Key ต้องตรงกับ labels.txt)
         calories_db = {
              "0 ก๋วยเตี๋ยว": "330-350", 
              "1 ข้าวมันไก่ต้ม": "539-619", 
@@ -131,30 +148,8 @@ def handle_image_message(event):
         
     except Exception as e:
         print(f"Error: {e}")
-        # กรณี Error มักเกิดจาก RAM ไม่พอใน Replit ฟรี
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัย ระบบประมวลผลรูปภาพขัดข้องชั่วคราวค่ะ"))
 
 if __name__ == "__main__":
      port = int(os.environ.get("PORT", 5000))
      app.run(host='0.0.0.0', port=port)
-try:
-        system_prompt = (
-            "คุณคือผู้เชี่ยวชาญด้านอาหารและสุขภาพที่ใจดี เป็นมิตร และพูดจาไพเราะ (ลงท้ายด้วย ค่ะ/นะคะ) "
-            "มีหน้าที่ตอบคำถาม คุยเล่น และให้คำแนะนำเรื่องอาหารการกินกับผู้ใช้ "
-            "กฎเหล็ก: ให้แนะนำอาหารในแง่ดี สร้างสรรค์ น่ากิน แต่ต้องคอยเตือนเรื่องที่ควรเตือนอย่างประนีประนอม "
-            "(เช่น หากผู้ใช้บอกว่าอยากกินของหวาน ให้แนะนำเมนูที่อร่อยแต่เตือนเรื่องปริมาณน้ำตาล หรือเสนอทางเลือกสุขภาพที่อร่อยไม่แพ้กัน) "
-            "เน้นการให้กำลังใจ ไม่พูดให้ผู้ใช้รู้สึกผิด และตอบคำถามทั่วไปอื่นๆ ได้อย่างเป็นธรรมชาติ"
-        )
-        
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=text,
-            config={'system_instruction': system_prompt}
-        )
-        
-        reply_text = response.text
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
-    except Exception as e:
-        print(f"Gemini Error: {e}")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัยด้วยนะคะ ระบบประมวลผลข้อความขัดข้องชั่วคราวค่ะ"))
