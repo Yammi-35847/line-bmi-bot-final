@@ -6,7 +6,9 @@ from PIL import Image, ImageOps
 import numpy as np
 import os
 import tensorflow as tf
-
+from google import genai
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyADD6S9tPlbAXXCElffpOkh6_d8MCwEidE")
+ai_client = genai.Client(api_key=GEMINI_KEY)
 app = Flask(__name__)
 
 # ตั้งค่า LINE API
@@ -135,3 +137,24 @@ def handle_image_message(event):
 if __name__ == "__main__":
      port = int(os.environ.get("PORT", 5000))
      app.run(host='0.0.0.0', port=port)
+try:
+        system_prompt = (
+            "คุณคือผู้เชี่ยวชาญด้านอาหารและสุขภาพที่ใจดี เป็นมิตร และพูดจาไพเราะ (ลงท้ายด้วย ค่ะ/นะคะ) "
+            "มีหน้าที่ตอบคำถาม คุยเล่น และให้คำแนะนำเรื่องอาหารการกินกับผู้ใช้ "
+            "กฎเหล็ก: ให้แนะนำอาหารในแง่ดี สร้างสรรค์ น่ากิน แต่ต้องคอยเตือนเรื่องที่ควรเตือนอย่างประนีประนอม "
+            "(เช่น หากผู้ใช้บอกว่าอยากกินของหวาน ให้แนะนำเมนูที่อร่อยแต่เตือนเรื่องปริมาณน้ำตาล หรือเสนอทางเลือกสุขภาพที่อร่อยไม่แพ้กัน) "
+            "เน้นการให้กำลังใจ ไม่พูดให้ผู้ใช้รู้สึกผิด และตอบคำถามทั่วไปอื่นๆ ได้อย่างเป็นธรรมชาติ"
+        )
+        
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=text,
+            config={'system_instruction': system_prompt}
+        )
+        
+        reply_text = response.text
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="ขออภัยด้วยนะคะ ระบบประมวลผลข้อความขัดข้องชั่วคราวค่ะ"))
